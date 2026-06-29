@@ -134,12 +134,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <div class="cat-tabs" id="catTabs"></div>
   <div class="dish-list" id="dishList"></div>
   <div class="add-dish-row">
-    <input type="text" id="customDishName" placeholder="输入菜名..." maxlength="30">
-    <select id="customDishCat">
-      <option value="冷菜">冷菜</option>
-      <option value="炒菜">炒菜</option>
-      <option value="汤类">汤类</option>
-    </select>
+    <input type="text" id="customDishName" placeholder="输入菜名，自动归入「自定义」..." maxlength="30">
+    <!-- 自定义菜品统一归入「自定义」分类 -->
     <button class="btn-add" onclick="addCustomDish()">➕ 添加</button>
   </div>
   <div class="cart-spacer"></div>
@@ -241,7 +237,7 @@ var DEFAULT_MENU = {
   汤类: ['冬瓜排骨汤', '鲫鱼豆腐汤', '鸡汤', '番茄蛋汤', '萝卜骨头汤', '山药肉圆汤']
 };
 
-var CATEGORIES = ['冷菜', '炒菜', '汤类'];
+var CATEGORIES = ['冷菜', '炒菜', '汤类', '自定义'];
 var PREFIX = 'hqtx_';
 
 function load(k, fb) {
@@ -315,10 +311,13 @@ function renderCatTabs() {
 
 function renderDishes() {
   var menu = getMenu();
-  var dishes = menu[currentCat] || [];
-  var custom = getCustomDishes().filter(function(d){ return d.category === currentCat; });
-  var all = dishes.map(function(n){ return {name:n, isCustom:false}; })
-    .concat(custom.map(function(d){ return {name:d.name, isCustom:true}; }));
+  var all;
+  if (currentCat === '自定义') {
+    all = getCustomDishes().map(function(d){ return {name: d.name, isCustom: true}; });
+  } else {
+    var dishes = menu[currentCat] || [];
+    all = dishes.map(function(n){ return {name: n, isCustom: false}; });
+  }
 
   $id('dishList').innerHTML = all.map(function(d) {
     var qty = cart[d.name] ? cart[d.name].qty : 0;
@@ -352,7 +351,7 @@ window.changeQty = function(name, delta) {
 window.addCustomDish = function() {
   var name = $id('customDishName').value.trim();
   if (!name) { toast('请输入菜名'); return; }
-  var cat = $id('customDishCat').value;
+  var cat = '自定义';
   var allNames = [];
   var menu = getMenu();
   Object.values(menu).forEach(function(arr){ allNames = allNames.concat(arr); });
@@ -615,7 +614,7 @@ window.generateDaily = function() {
 
   var html = '<h3>🎯 ' + today + ' 每日菜单</h3>';
   CATEGORIES.forEach(function(cat){
-    if (result[cat].length) {
+    if (result[cat] && result[cat].length) {
       html += '<div class="daily-cat"><h4>' + cat + '（' + result[cat].length + '道）</h4>';
       result[cat].forEach(function(d){ html += '<div class="daily-dish">' + d + '</div>'; });
       html += '</div>';

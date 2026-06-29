@@ -196,10 +196,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <div class="modal">
     <h3>📝 确认订单</h3>
     <div class="form-group">
-      <label>👤 点菜人</label>
-      <input type="text" id="orderPerson" placeholder="输入你的名字..." maxlength="20">
-    </div>
-    <div class="form-group">
       <label>📅 订单日期</label>
       <input type="date" id="orderDate">
     </div>
@@ -428,14 +424,12 @@ window.closeOrderModal = function() {
 };
 
 window.submitOrder = function() {
-  var person = $id('orderPerson').value.trim();
-  if (!person) { toast('请输入点菜人名字'); return; }
   var date = $id('orderDate').value;
   if (!date) { toast('请选择日期'); return; }
   var selectVal = $id('orderSelect').value;
 
   var cartItems = Object.values(cart).map(function(i){
-    return { name: i.name, category: i.category, qty: i.qty, addedBy: person };
+    return { name: i.name, category: i.category, qty: i.qty, addedBy: '' };
   });
 
   var orders = getOrders();
@@ -450,7 +444,7 @@ window.submitOrder = function() {
     var idx = parseInt(selectVal);
     orderId = orders[idx].id;
     cartItems.forEach(function(ci){
-      var existing = orders[idx].items.find(function(i){ return i.name === ci.name && i.addedBy === ci.addedBy; });
+      var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
       if (existing) { existing.qty += ci.qty; }
       else { orders[idx].items.push(ci); }
     });
@@ -476,15 +470,14 @@ function renderOrders() {
       var grouped = {};
       o.items.forEach(function(i){
         var k = '[' + i.category + '] ' + i.name;
-        if (!grouped[k]) grouped[k] = { name: k, qty: 0, by: [] };
+        if (!grouped[k]) grouped[k] = { name: k, qty: 0 };
         grouped[k].qty += i.qty;
-        if (grouped[k].by.indexOf(i.addedBy) === -1) grouped[k].by.push(i.addedBy);
       });
       return '<div class="order-card">' +
         '<div class="order-header"><span class="order-id">📋 订单 #' + o.id + '</span><span class="order-date">' + o.date + ' · ' + o.items.length + '道菜</span></div>' +
         '<div class="order-items">' +
           Object.values(grouped).map(function(g){
-            return '<div class="order-item-row"><span>' + g.name + ' ×' + g.qty + '</span><span class="by">' + g.by.join('、') + '</span></div>';
+            return '<div class="order-item-row"><span>' + g.name + ' ×' + g.qty + '</span></div>';
           }).join('') +
         '</div>' +
         '<div style="margin-top:12px;text-align:right;">' +
@@ -570,15 +563,14 @@ function renderHistory() {
         var groupedItems = {};
         o.items.forEach(function(i){
           var k = '[' + i.category + '] ' + i.name;
-          if (!groupedItems[k]) groupedItems[k] = { name: k, qty:0, by:[] };
+          if (!groupedItems[k]) groupedItems[k] = { name: k, qty:0 };
           groupedItems[k].qty += i.qty;
-          if (groupedItems[k].by.indexOf(i.addedBy) === -1) groupedItems[k].by.push(i.addedBy);
         });
         return '<div class="history-card">' +
           '<div style="font-weight:600;color:#1a4a8a;margin-bottom:6px;">订单 #' + o.id + '</div>' +
           '<div style="font-size:14px;color:#3a5a7a;line-height:1.8;">' +
             Object.values(groupedItems).map(function(g){
-              return '<div class="order-item-row"><span>' + g.name + ' ×' + g.qty + '</span><span class="by">' + g.by.join('、') + '</span></div>';
+              return '<div class="order-item-row"><span>' + g.name + ' ×' + g.qty + '</span></div>';
             }).join('') +
           '</div>' +
           '<div style="font-size:11px;color:#8899aa;margin-top:6px;">完成时间：' + new Date(o.completedAt).toLocaleString('zh-CN') + '</div>' +

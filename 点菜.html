@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>豪情天下 - 点菜系统</title>
+
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; background: #e8f0fe; color: #1a2a4a; min-height: 100vh; padding-bottom: 80px; }
 
-.header { background: linear-gradient(135deg, #0d1b3e 0%, #1a3a6b 50%, #0d4a8a 100%); color: #fff; padding: 18px 16px; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(13,27,62,0.3); }
+.header { background: linear-gradient(135deg, #0d1b3e 0%, #1a3a6b 50%, #0d4a8a 100%); color: #fff; padding: 14px 16px; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(13,27,62,0.3); }
 .header h1 { font-size: 22px; letter-spacing: 3px; }
 .header .subtitle { font-size: 12px; opacity: 0.75; margin-top: 2px; }
-
 .tabs { display: flex; background: #fff; border-bottom: 2px solid #d0dff5; position: sticky; top: 76px; z-index: 99; }
 .tab { flex: 1; text-align: center; padding: 14px 8px; font-size: 14px; font-weight: 600; color: #6b8ab5; cursor: pointer; transition: all .2s; border-bottom: 3px solid transparent; user-select: none; }
 .tab.active { color: #1a4a8a; border-bottom-color: #1a4a8a; background: #f0f6ff; }
@@ -39,7 +39,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .add-dish-row { background: #fff; border-radius: 12px; padding: 10px 16px; display: flex; gap: 8px; align-items: center; margin-top: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .add-dish-row input { flex: 1; border: 1.5px solid #d0dff5; border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color .2s; min-width: 0; }
 .add-dish-row input:focus { border-color: #1a4a8a; }
-.add-dish-row select { border: 1.5px solid #d0dff5; border-radius: 8px; padding: 10px 8px; font-size: 14px; outline: none; color: #1a2a4a; background: #fff; }
 .btn-add { background: #1a4a8a; color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .2s; }
 .btn-add:active { background: #0d3a6a; }
 
@@ -63,7 +62,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .order-date { font-size: 12px; color: #8899aa; }
 .order-items { font-size: 14px; color: #3a5a7a; line-height: 1.8; }
 .order-item-row { display: flex; justify-content: space-between; padding: 3px 0; }
-.order-item-row .by { font-size: 11px; color: #aab; }
+
 .btn-sm { padding: 6px 14px; border-radius: 16px; border: 1.5px solid #1a4a8a; background: #fff; color: #1a4a8a; font-size: 12px; font-weight: 600; cursor: pointer; margin-right: 8px; transition: all .15s; }
 .btn-sm:active { background: #e0ecff; }
 .btn-sm.danger { border-color: #c44; color: #c44; }
@@ -135,7 +134,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <div class="dish-list" id="dishList"></div>
   <div class="add-dish-row">
     <input type="text" id="customDishName" placeholder="输入菜名，自动归入「自定义」..." maxlength="30">
-    <!-- 自定义菜品统一归入「自定义」分类 -->
     <button class="btn-add" onclick="addCustomDish()">➕ 添加</button>
   </div>
   <div class="cart-spacer"></div>
@@ -220,6 +218,30 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 (function(){
 'use strict';
 
+// ==================== GITHUB BACKEND CONFIG ====================
+// 只需要一个 GitHub Token！在 https://github.com/settings/tokens 创建
+// 选 "Fine-grained token" → 仅给 haochu 仓库 → Contents: Read and Write
+var GH_CONFIG = {
+  token: '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',
+  owner: 'syhhff',
+  repo: 'haochu',
+  branch: 'master'
+};
+
+var ghReady = false;
+
+try {
+  if (GH_CONFIG.token !== 'YOUR_GITHUB_TOKEN') {
+    ghReady = true;
+    console.log('🐙 GitHub 后端已就绪 — 多人实时同步');
+  } else {
+    console.warn('⚠️ GitHub Token 未配置，使用本机模式');
+  }
+} catch(e) {
+  console.warn('⚠️ 初始化失败:', e.message);
+}
+
+// ==================== CONSTANTS ====================
 var DEFAULT_MENU = {
   冷菜: ['牛肉', '鸡爪', '猪耳朵', '鸭头', '猪蹄'],
   炒菜: [
@@ -236,6 +258,7 @@ var DEFAULT_MENU = {
 var CATEGORIES = ['冷菜', '炒菜', '汤类', '自定义'];
 var PREFIX = 'hqtx_';
 
+// ==================== LOCAL STORAGE ====================
 function load(k, fb) {
   try { var v = localStorage.getItem(PREFIX + k); return v ? JSON.parse(v) : fb; }
   catch(e) { return fb; }
@@ -245,15 +268,183 @@ function save(k, v) {
 }
 
 function getMenu() { return load('menu', DEFAULT_MENU); }
-function getOrders() { return load('orders', []); }
-function saveOrders(o) { save('orders', o); }
-function getHistory() { return load('history', []); }
-function saveHistory(h) { save('history', h); }
 function getCart() { return load('cart', {}); }
 function saveCart(c) { save('cart', c); }
 function getCustomDishes() { return load('custom', []); }
 function saveCustomDishes(d) { save('custom', d); }
+function getOrdersLocal() { return load('orders', []); }
+function saveOrdersLocal(o) { save('orders', o); }
 
+// ==================== GITHUB DATA LAYER ====================
+var ordersCache = [];
+var historyCache = [];
+var currentTab = 'menu';
+var pollTimer = null;
+var lastOrdersETag = '';
+var lastHistoryETag = '';
+
+function getOrders() {
+  if (ghReady) return ordersCache;
+  return getOrdersLocal();
+}
+
+// Read orders from GitHub raw
+function fetchOrders(callback) {
+  if (!ghReady) { if (callback) callback(); return; }
+  var url = 'https://raw.githubusercontent.com/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/' + GH_CONFIG.branch + '/orders_data.json';
+  var headers = {};
+  if (lastOrdersETag) headers['If-None-Match'] = lastOrdersETag;
+
+  fetch(url, { headers: headers, cache: 'no-store' })
+    .then(function(res) {
+      if (res.status === 304) { if (callback) callback(); return; } // not modified
+      lastOrdersETag = res.headers.get('ETag') || '';
+      return res.json();
+    })
+    .then(function(data) {
+      if (!data) return;
+      ordersCache = data;
+      if (currentTab === 'orders') renderOrders();
+      if (callback) callback();
+    })
+    .catch(function(err) {
+      console.error('获取订单失败:', err);
+      if (callback) callback();
+    });
+}
+
+// Read history from GitHub raw
+function fetchHistory() {
+  if (!ghReady) return;
+  var url = 'https://raw.githubusercontent.com/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/' + GH_CONFIG.branch + '/history_data.json';
+  var headers = {};
+  if (lastHistoryETag) headers['If-None-Match'] = lastHistoryETag;
+
+  fetch(url, { headers: headers, cache: 'no-store' })
+    .then(function(res) {
+      if (res.status === 304) return;
+      lastHistoryETag = res.headers.get('ETag') || '';
+      return res.json();
+    })
+    .then(function(data) {
+      if (!data) return;
+      historyCache = data;
+      if (currentTab === 'history') renderHistory();
+    })
+    .catch(function(err) {
+      console.error('获取历史失败:', err);
+    });
+}
+
+// Get SHA of a file (needed for writes)
+function getShaAndContent(filename) {
+  var url = 'https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/' + filename + '?ref=' + GH_CONFIG.branch;
+  return fetch(url, {
+    headers: {
+      'Authorization': 'Bearer ' + GH_CONFIG.token,
+      'Accept': 'application/vnd.github+json'
+    }
+  }).then(function(res) {
+    if (!res.ok) throw new Error('获取文件信息失败: ' + res.status);
+    return res.json();
+  }).then(function(data) {
+    var content = JSON.parse(atob(data.content));
+    return { sha: data.sha, content: content };
+  });
+}
+
+// Write orders to GitHub
+function saveOrdersToGitHub(orders) {
+  updateFile('orders_data.json', orders, '📝 更新订单');
+}
+
+// Write history to GitHub
+function saveHistoryToGitHub(history) {
+  updateFile('history_data.json', history, '📜 更新历史');
+}
+
+function updateFile(filename, data, msg) {
+  // First get the current SHA
+  var url = 'https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/' + filename + '?ref=' + GH_CONFIG.branch;
+  return fetch(url, {
+    headers: {
+      'Authorization': 'Bearer ' + GH_CONFIG.token,
+      'Accept': 'application/vnd.github+json'
+    }
+  }).then(function(res) {
+    if (!res.ok) throw new Error('获取文件信息失败: ' + res.status);
+    return res.json();
+  }).then(function(fileInfo) {
+    var content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    return fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + GH_CONFIG.token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: msg,
+        content: content,
+        sha: fileInfo.sha,
+        branch: GH_CONFIG.branch
+      })
+    });
+  }).then(function(res) {
+    if (!res.ok) throw new Error('写入失败: ' + res.status);
+    return res.json();
+  });
+}
+
+function atomicallyUpdateOrders(modifyFn, callback) {
+  if (!ghReady) { if (callback) callback(); return; }
+
+  getShaAndContent('orders_data.json').then(function(result) {
+    var newData = modifyFn(result.content);
+    var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(newData, null, 2))));
+    return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/orders_data.json', {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + GH_CONFIG.token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: '📝 更新订单',
+        content: contentB64,
+        sha: result.sha,
+        branch: GH_CONFIG.branch
+      })
+    });
+  }).then(function(res) {
+    if (res && !res.ok) throw new Error('写入失败: ' + res.status);
+    // Invalidate cache and re-fetch
+    lastOrdersETag = '';
+    fetchOrders(callback);
+  }).catch(function(err) {
+    console.error('操作失败:', err);
+    toast('❌ ' + err.message);
+    if (callback) callback();
+  });
+}
+
+// Start polling
+function startPolling() {
+  if (!ghReady) return;
+  stopPolling();
+  fetchOrders();
+  fetchHistory();
+  pollTimer = setInterval(function() {
+    fetchOrders();
+    fetchHistory();
+  }, 2000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+// ==================== HELPERS ====================
 var currentCat = '炒菜';
 var cart = getCart();
 var toastTimer = null;
@@ -282,11 +473,12 @@ document.querySelectorAll('.tab').forEach(function(tab) {
   tab.addEventListener('click', function() {
     document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
     tab.classList.add('active');
+    currentTab = tab.dataset.tab;
     document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
-    $id('panel-' + tab.dataset.tab).classList.add('active');
-    $id('cartBar').style.display = tab.dataset.tab === 'menu' ? 'flex' : 'none';
-    if (tab.dataset.tab === 'orders') renderOrders();
-    if (tab.dataset.tab === 'history') renderHistory();
+    $id('panel-' + currentTab).classList.add('active');
+    $id('cartBar').style.display = currentTab === 'menu' ? 'flex' : 'none';
+    if (currentTab === 'orders') renderOrders();
+    if (currentTab === 'history') renderHistory();
   });
 });
 
@@ -347,17 +539,16 @@ window.changeQty = function(name, delta) {
 window.addCustomDish = function() {
   var name = $id('customDishName').value.trim();
   if (!name) { toast('请输入菜名'); return; }
-  var cat = '自定义';
   var allNames = [];
   var menu = getMenu();
   Object.values(menu).forEach(function(arr){ allNames = allNames.concat(arr); });
   getCustomDishes().forEach(function(d){ allNames.push(d.name); });
   if (allNames.indexOf(name) !== -1) { toast('该菜品已存在'); return; }
   var custom = getCustomDishes();
-  custom.push({ name: name, category: cat });
+  custom.push({ name: name, category: '自定义' });
   saveCustomDishes(custom);
   $id('customDishName').value = '';
-  if (currentCat !== cat) { currentCat = cat; renderCatTabs(); }
+  if (currentCat !== '自定义') { currentCat = '自定义'; renderCatTabs(); }
   renderDishes();
   toast('已添加自定义菜品：' + name);
 };
@@ -392,8 +583,6 @@ window.clearCart = function() {
 };
 
 // ==================== ORDER MODAL ====================
-var _origOpenOrderModal = null;
-
 window.openOrderModal = function() {
   var items = Object.values(cart);
   if (!items.length) { toast('请先选择菜品'); return; }
@@ -411,10 +600,11 @@ window.openOrderModal = function() {
 
   $id('orderModal').classList.add('show');
 
-  // Pre-select pending order if any
   var pendingIdx = sessionStorage.getItem('hqtx_pending_order_idx');
   if (pendingIdx !== null) {
-    $id('orderSelect').value = pendingIdx;
+    if (sel.querySelector('option[value="' + pendingIdx + '"]')) {
+      sel.value = pendingIdx;
+    }
     sessionStorage.removeItem('hqtx_pending_order_idx');
   }
 };
@@ -429,27 +619,50 @@ window.submitOrder = function() {
   var selectVal = $id('orderSelect').value;
 
   var cartItems = Object.values(cart).map(function(i){
-    return { name: i.name, category: i.category, qty: i.qty, addedBy: '' };
+    return { name: i.name, category: i.category, qty: i.qty };
   });
 
-  var orders = getOrders();
-  var orderId;
-
-  if (selectVal === 'new') {
-    orderId = Date.now().toString(36).toUpperCase();
-    orders.push({ id: orderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
-    saveOrders(orders);
-    toast('✅ 新订单 #' + orderId + ' 已创建！');
-  } else {
-    var idx = parseInt(selectVal);
-    orderId = orders[idx].id;
-    cartItems.forEach(function(ci){
-      var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
-      if (existing) { existing.qty += ci.qty; }
-      else { orders[idx].items.push(ci); }
+  if (ghReady) {
+    atomicallyUpdateOrders(function(orders) {
+      orders = orders || [];
+      if (selectVal === 'new') {
+        var orderId = Date.now().toString(36).toUpperCase();
+        orders.push({ id: orderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
+        toast('✅ 新订单 #' + orderId + ' 已创建！');
+      } else {
+        var idx = parseInt(selectVal);
+        if (idx < 0 || idx >= orders.length) { toast('❌ 订单不存在'); return orders; }
+        cartItems.forEach(function(ci){
+          var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
+          if (existing) { existing.qty += ci.qty; }
+          else { orders[idx].items.push(ci); }
+        });
+        toast('✅ 已添加到订单 #' + orders[idx].id);
+      }
+      return orders;
     });
-    saveOrders(orders);
-    toast('✅ 已添加到订单 #' + orderId);
+  } else {
+    var orders = getOrdersLocal();
+    var orderId;
+    if (selectVal === 'new') {
+      orderId = Date.now().toString(36).toUpperCase();
+      orders.push({ id: orderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
+      saveOrdersLocal(orders);
+      ordersCache = orders;
+      toast('✅ 新订单 #' + orderId + ' 已创建！（仅本机）');
+    } else {
+      var idx = parseInt(selectVal);
+      if (idx < 0 || idx >= orders.length) { toast('❌ 订单不存在'); return; }
+      orderId = orders[idx].id;
+      cartItems.forEach(function(ci){
+        var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
+        if (existing) { existing.qty += ci.qty; }
+        else { orders[idx].items.push(ci); }
+      });
+      saveOrdersLocal(orders);
+      ordersCache = orders;
+      toast('✅ 已添加到订单 #' + orderId + '（仅本机）');
+    }
   }
 
   cart = {};
@@ -458,7 +671,7 @@ window.submitOrder = function() {
   window.closeOrderModal();
 };
 
-// ==================== ORDERS ====================
+// ==================== ORDERS PANEL ====================
 function renderOrders() {
   var orders = getOrders();
   var container = $id('activeOrders');
@@ -510,6 +723,7 @@ window.addToOrderFromPanel = function(idx) {
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
   $id('panel-menu').classList.add('active');
   $id('cartBar').style.display = 'flex';
+  currentTab = 'menu';
   sessionStorage.setItem('hqtx_pending_order_idx', idx);
   toast('请在点菜页面选择菜品，下单时将加到该订单');
   updateCartUI();
@@ -518,31 +732,82 @@ window.addToOrderFromPanel = function(idx) {
 window.completeOrder = function(idx) {
   var orders = getOrders();
   var order = orders[idx];
+  if (!order) { toast('订单不存在'); return; }
   if (!confirm('确定完成订单 #' + order.id + ' 吗？\n\n完成后将从进行中移除并保存到历史记录。')) return;
 
-  var history = getHistory();
-  history.unshift({ id: order.id, date: order.date, createdAt: order.createdAt, items: order.items, completedAt: new Date().toISOString() });
-  saveHistory(history);
+  if (ghReady) {
+    atomicallyUpdateOrders(function(ordersData) {
+      ordersData = ordersData || [];
+      var removed = ordersData.splice(idx, 1);
+      if (!removed.length) { toast('订单不存在'); return ordersData; }
+      var completed = removed[0];
+      var historyRecord = {
+        id: completed.id, date: completed.date, createdAt: completed.createdAt,
+        items: completed.items, completedAt: new Date().toISOString()
+      };
 
-  orders.splice(idx, 1);
-  saveOrders(orders);
-  sessionStorage.removeItem('hqtx_pending_order_idx');
+      // Also update history
+      saveHistoryToGitHubWrap(historyRecord);
 
-  toast('✅ 订单 #' + order.id + ' 已完成');
-  renderOrders();
-  renderHistory();
+      toast('✅ 订单 #' + completed.id + ' 已完成');
+      return ordersData;
+    });
+  } else {
+    var ordersLocal = getOrdersLocal();
+    var completed = ordersLocal.splice(idx, 1)[0];
+    saveOrdersLocal(ordersLocal);
+    ordersCache = ordersLocal;
+
+    var history = load('history', []);
+    history.unshift({ id: completed.id, date: completed.date, createdAt: completed.createdAt, items: completed.items, completedAt: new Date().toISOString() });
+    save('history', history);
+
+    toast('✅ 订单 #' + completed.id + ' 已完成');
+    renderOrders();
+    renderHistory();
+  }
 };
+
+function saveHistoryToGitHubWrap(record) {
+  getShaAndContent('history_data.json').then(function(result) {
+    var history = result.content || [];
+    history.unshift(record);
+    var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(history, null, 2))));
+    return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/history_data.json', {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + GH_CONFIG.token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: '📜 更新历史',
+        content: contentB64,
+        sha: result.sha,
+        branch: GH_CONFIG.branch
+      })
+    });
+  }).then(function() {
+    lastHistoryETag = '';
+    fetchHistory();
+  }).catch(function(err) {
+    console.error('历史写入失败:', err);
+  });
+}
 
 // ==================== HISTORY ====================
 function renderHistory() {
-  var history = getHistory();
+  var history = ghReady ? historyCache : load('history', []);
+
   var container = $id('historyContent');
 
   var fiveDaysAgo = new Date();
   fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
   fiveDaysAgo.setHours(0,0,0,0);
   var recent = history.filter(function(h){ return new Date(h.completedAt) >= fiveDaysAgo; });
-  if (recent.length !== history.length) saveHistory(recent);
+  if (recent.length !== history.length && !ghReady) {
+    save('history', recent);
+  }
 
   if (!recent.length) {
     container.innerHTML = '<div class="empty"><div class="icon">📜</div>最近5天暂无订单记录</div>';
@@ -557,9 +822,9 @@ function renderHistory() {
   });
 
   container.innerHTML = Object.entries(grouped).sort(function(a,b){ return b[0].localeCompare(a[0]); }).map(function(entry){
-    var date = entry[0], orders = entry[1];
+    var date = entry[0], dayOrders = entry[1];
     return '<div class="history-day"><div class="history-date">📅 ' + date + '</div>' +
-      orders.map(function(o){
+      dayOrders.map(function(o){
         var groupedItems = {};
         o.items.forEach(function(i){
           var k = '[' + i.category + '] ' + i.name;
@@ -622,15 +887,15 @@ window.generateDaily = function() {
 
 window.useDailyMenu = function() {
   cart = {};
-  var currentCat = null;
+  var curCat = null;
   $id('dailyResult').querySelectorAll('h4, .daily-dish').forEach(function(el){
     if (el.tagName === 'H4') {
       for (var i = 0; i < CATEGORIES.length; i++) {
-        if (el.textContent.indexOf(CATEGORIES[i]) === 0) { currentCat = CATEGORIES[i]; break; }
+        if (el.textContent.indexOf(CATEGORIES[i]) === 0) { curCat = CATEGORIES[i]; break; }
       }
-    } else if (el.classList.contains('daily-dish') && currentCat) {
+    } else if (el.classList.contains('daily-dish') && curCat) {
       var name = el.textContent.trim();
-      cart[name] = { name: name, category: currentCat, qty: 1 };
+      cart[name] = { name: name, category: curCat, qty: 1 };
     }
   });
 
@@ -642,6 +907,7 @@ window.useDailyMenu = function() {
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
   $id('panel-menu').classList.add('active');
   $id('cartBar').style.display = 'flex';
+  currentTab = 'menu';
 
   toast('每日菜单已加入购物车，请下单！');
 };
@@ -651,7 +917,15 @@ function init() {
   renderCatTabs();
   renderDishes();
   updateCartUI();
-  renderHistory();
+
+  if (ghReady) {
+    startPolling();
+    renderOrders();
+  } else {
+    ordersCache = getOrdersLocal();
+    renderOrders();
+    renderHistory();
+  }
 }
 
 init();

@@ -397,35 +397,59 @@ function updateFile(filename, data, msg) {
 }
 
 function atomicallyUpdateOrders(modifyFn, callback) {
-  if (!ghReady) { if (callback) callback(); return; }
+  if (!ghReady) { if (callback) callback(true); return; }
 
-  getShaAndContent('orders_data.json').then(function(result) {
-    var newData = modifyFn(result.content);
-    var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(newData, null, 2))));
-    return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/orders_data.json', {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + GH_CONFIG.token,
-        'Accept': 'application/vnd.github+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: '📝 更新订单',
-        content: contentB64,
-        sha: result.sha,
-        branch: GH_CONFIG.branch
-      })
+  var maxRetries = 3;
+
+  function attempt(retryCount) {
+    getShaAndContent('orders_data.json').then(function(result) {
+      var newData = modifyFn(result.content);
+      if (newData === null) {
+        // modifyFn signals "no write needed" (e.g. order not found)
+        if (callback) callback(false);
+        return;
+      }
+      var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(newData, null, 2))));
+      return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/orders_data.json', {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Bearer ' + GH_CONFIG.token,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: '📝 更新订单',
+          content: contentB64,
+          sha: result.sha,
+          branch: GH_CONFIG.branch
+        })
+      }).then(function(res) {
+        if (res.status === 409 && retryCount < maxRetries) {
+          // Conflict — another device wrote first. Retry with fresh SHA
+          console.warn('⚠️ 写入冲突，自动重试 (' + (retryCount + 1) + '/' + maxRetries + ')');
+          return new Promise(function(resolve) { setTimeout(resolve, 200 + Math.random() * 300); })
+            .then(function() { return attempt(retryCount + 1); });
+        }
+        if (!res.ok) throw new Error('写入失败 HTTP ' + res.status);
+        // ✅ Success — update local cache directly (avoids CDN cache delay)
+        ordersCache = newData;
+        lastOrdersETag = '';
+        // Polling will re-fetch in background; no need to fetch now
+        if (callback) callback(true);
+      });
+    }).catch(function(err) {
+      console.error('操作失败:', err);
+      if (retryCount < maxRetries) {
+        console.warn('⚠️ 网络错误，自动重试 (' + (retryCount + 1) + '/' + maxRetries + ')');
+        return new Promise(function(resolve) { setTimeout(resolve, 500 + Math.random() * 500); })
+          .then(function() { return attempt(retryCount + 1); });
+      }
+      toast('❌ 同步失败，请稍后重试');
+      if (callback) callback(false);
     });
-  }).then(function(res) {
-    if (res && !res.ok) throw new Error('写入失败: ' + res.status);
-    // Invalidate cache and re-fetch
-    lastOrdersETag = '';
-    fetchOrders(callback);
-  }).catch(function(err) {
-    console.error('操作失败:', err);
-    toast('❌ ' + err.message);
-    if (callback) callback();
-  });
+  }
+
+  attempt(0);
 }
 
 // Start polling
@@ -592,7 +616,7 @@ window.openOrderModal = function() {
   var orders = getOrders();
   var sel = $id('orderSelect');
   sel.innerHTML = '<option value="new">🆕 创建新订单</option>' +
-    orders.map(function(o, i){ return '<option value="' + i + '">📋 订单 #' + o.id + ' (' + o.date + ' · ' + o.items.length + '道菜)</option>'; }).join('');
+    orders.map(function(o){ return '<option value="' + o.id + '">📋 订单 #' + o.id + ' (' + o.date + ' · ' + o.items.length + '道菜)</option>'; }).join('');
 
   $id('cartReview').innerHTML = items.map(function(i){
     return '<div class="cr-item"><span>[' + i.category + '] ' + i.name + '</span><span>x' + i.qty + '</span></div>';
@@ -600,12 +624,13 @@ window.openOrderModal = function() {
 
   $id('orderModal').classList.add('show');
 
-  var pendingIdx = sessionStorage.getItem('hqtx_pending_order_idx');
-  if (pendingIdx !== null) {
-    if (sel.querySelector('option[value="' + pendingIdx + '"]')) {
-      sel.value = pendingIdx;
+  // Pre-select pending order by its ID (stored in sessionStorage)
+  var pendingId = sessionStorage.getItem('hqtx_pending_order_id');
+  if (pendingId !== null) {
+    if (sel.querySelector('option[value="' + pendingId + '"]')) {
+      sel.value = pendingId;
     }
-    sessionStorage.removeItem('hqtx_pending_order_idx');
+    sessionStorage.removeItem('hqtx_pending_order_id');
   }
 };
 
@@ -616,59 +641,86 @@ window.closeOrderModal = function() {
 window.submitOrder = function() {
   var date = $id('orderDate').value;
   if (!date) { toast('请选择日期'); return; }
-  var selectVal = $id('orderSelect').value;
+  var selectVal = $id('orderSelect').value;  // 'new' or orderId
 
   var cartItems = Object.values(cart).map(function(i){
     return { name: i.name, category: i.category, qty: i.qty };
   });
 
-  if (ghReady) {
-    atomicallyUpdateOrders(function(orders) {
-      orders = orders || [];
-      if (selectVal === 'new') {
-        var orderId = Date.now().toString(36).toUpperCase();
-        orders.push({ id: orderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
-        toast('✅ 新订单 #' + orderId + ' 已创建！');
-      } else {
-        var idx = parseInt(selectVal);
-        if (idx < 0 || idx >= orders.length) { toast('❌ 订单不存在'); return orders; }
-        cartItems.forEach(function(ci){
-          var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
-          if (existing) { existing.qty += ci.qty; }
-          else { orders[idx].items.push(ci); }
-        });
-        toast('✅ 已添加到订单 #' + orders[idx].id);
-      }
-      return orders;
-    });
-  } else {
-    var orders = getOrdersLocal();
-    var orderId;
-    if (selectVal === 'new') {
-      orderId = Date.now().toString(36).toUpperCase();
-      orders.push({ id: orderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
-      saveOrdersLocal(orders);
-      ordersCache = orders;
-      toast('✅ 新订单 #' + orderId + ' 已创建！（仅本机）');
-    } else {
-      var idx = parseInt(selectVal);
-      if (idx < 0 || idx >= orders.length) { toast('❌ 订单不存在'); return; }
-      orderId = orders[idx].id;
-      cartItems.forEach(function(ci){
-        var existing = orders[idx].items.find(function(i){ return i.name === ci.name; });
-        if (existing) { existing.qty += ci.qty; }
-        else { orders[idx].items.push(ci); }
-      });
-      saveOrdersLocal(orders);
-      ordersCache = orders;
-      toast('✅ 已添加到订单 #' + orderId + '（仅本机）');
+  var createdOrderId = null;
+  var addedToOrderId = null;
+  var orderGone = false;  // true if target order was deleted by someone else
+
+  function onSyncDone(success) {
+    if (orderGone || !success) {
+      // Order was removed OR sync failed — keep cart, close modal
+      window.closeOrderModal();
+      updateCartUI();  // re-enable submit button
+      if (currentTab === 'orders') renderOrders();
+      return;
+    }
+    cart = {};
+    saveCartState();
+    renderDishes();
+    window.closeOrderModal();
+    if (createdOrderId) {
+      toast('✅ 新订单 #' + createdOrderId + ' 已创建！');
+      createdOrderId = null;
+    } else if (addedToOrderId) {
+      toast('✅ 已添加到订单 #' + addedToOrderId + '！');
+      addedToOrderId = null;
     }
   }
 
-  cart = {};
-  saveCartState();
-  renderDishes();
-  window.closeOrderModal();
+  if (ghReady) {
+    // Show syncing feedback and disable button to prevent double-tap
+    toast('⏳ 同步中...');
+    $id('btnSubmit').disabled = true;
+
+    atomicallyUpdateOrders(function(orders) {
+      orders = orders || [];
+      if (selectVal === 'new') {
+        createdOrderId = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
+        orders.push({ id: createdOrderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
+      } else {
+        var order = orders.find(function(o) { return o.id === selectVal; });
+        if (!order) {
+          orderGone = true;
+          toast('❌ 该订单已不存在，请刷新后重新选择');
+          return null;  // signal: skip write
+        }
+        addedToOrderId = order.id;
+        cartItems.forEach(function(ci){
+          var existing = order.items.find(function(i){ return i.name === ci.name; });
+          if (existing) { existing.qty += ci.qty; }
+          else { order.items.push(ci); }
+        });
+      }
+      return orders;
+    }, onSyncDone);
+  } else {
+    var orders = getOrdersLocal();
+    if (selectVal === 'new') {
+      createdOrderId = Date.now().toString(36).toUpperCase();
+      orders.push({ id: createdOrderId, date: date, createdAt: new Date().toISOString(), items: cartItems.slice() });
+    } else {
+      var order = orders.find(function(o) { return o.id === selectVal; });
+      if (!order) {
+        toast('❌ 该订单已不存在');
+        window.closeOrderModal();
+        return;
+      }
+      addedToOrderId = order.id;
+      cartItems.forEach(function(ci){
+        var existing = order.items.find(function(i){ return i.name === ci.name; });
+        if (existing) { existing.qty += ci.qty; }
+        else { order.items.push(ci); }
+      });
+    }
+    saveOrdersLocal(orders);
+    ordersCache = orders;
+    onSyncDone();
+  }
 };
 
 // ==================== ORDERS PANEL ====================
@@ -679,7 +731,7 @@ function renderOrders() {
   if (!orders.length) {
     container.innerHTML = '<div class="empty"><div class="icon">📭</div>暂无进行中的订单</div>';
   } else {
-    container.innerHTML = orders.map(function(o, idx){
+    container.innerHTML = orders.map(function(o){
       var grouped = {};
       o.items.forEach(function(i){
         var k = '[' + i.category + '] ' + i.name;
@@ -694,8 +746,8 @@ function renderOrders() {
           }).join('') +
         '</div>' +
         '<div style="margin-top:12px;text-align:right;">' +
-          '<button class="btn-sm" onclick="addToOrderFromPanel(' + idx + ')">➕ 加菜</button>' +
-          '<button class="btn-sm danger" onclick="completeOrder(' + idx + ')">✅ 完成订单</button>' +
+          '<button class="btn-sm" onclick="addToOrderFromPanel(\'' + o.id + '\')">➕ 加菜</button>' +
+          '<button class="btn-sm danger" onclick="completeOrder(\'' + o.id + '\')">✅ 完成订单</button>' +
         '</div></div>';
     }).join('');
   }
@@ -708,39 +760,39 @@ function renderAddToOrderArea() {
   if (!orders.length) {
     area.innerHTML = '<div class="empty" style="padding:20px;">暂无订单可加菜</div>';
   } else {
-    area.innerHTML = orders.map(function(o, idx){
+    area.innerHTML = orders.map(function(o){
       return '<div class="order-card" style="padding:12px 16px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;">' +
         '<span>📋 订单 #' + o.id + ' <span style="font-size:12px;color:#8899aa;">(' + o.date + ')</span></span>' +
-        '<button class="btn-sm" onclick="addToOrderFromPanel(' + idx + ')">➕ 加菜到此订单</button></div></div>';
+        '<button class="btn-sm" onclick="addToOrderFromPanel(\'' + o.id + '\')">➕ 加菜到此订单</button></div></div>';
     }).join('');
   }
 }
 
-window.addToOrderFromPanel = function(idx) {
+window.addToOrderFromPanel = function(orderId) {
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   document.querySelector('.tab[data-tab="menu"]').classList.add('active');
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
   $id('panel-menu').classList.add('active');
   $id('cartBar').style.display = 'flex';
   currentTab = 'menu';
-  sessionStorage.setItem('hqtx_pending_order_idx', idx);
+  sessionStorage.setItem('hqtx_pending_order_id', orderId);
   toast('请在点菜页面选择菜品，下单时将加到该订单');
   updateCartUI();
 };
 
-window.completeOrder = function(idx) {
+window.completeOrder = function(orderId) {
   var orders = getOrders();
-  var order = orders[idx];
+  var order = orders.find(function(o) { return o.id === orderId; });
   if (!order) { toast('订单不存在'); return; }
   if (!confirm('确定完成订单 #' + order.id + ' 吗？\n\n完成后将从进行中移除并保存到历史记录。')) return;
 
   if (ghReady) {
     atomicallyUpdateOrders(function(ordersData) {
       ordersData = ordersData || [];
-      var removed = ordersData.splice(idx, 1);
-      if (!removed.length) { toast('订单不存在'); return ordersData; }
-      var completed = removed[0];
+      var idx = ordersData.findIndex(function(o) { return o.id === orderId; });
+      if (idx === -1) { toast('❌ 订单不存在'); return null; }
+      var completed = ordersData.splice(idx, 1)[0];
       var historyRecord = {
         id: completed.id, date: completed.date, createdAt: completed.createdAt,
         items: completed.items, completedAt: new Date().toISOString()
@@ -749,11 +801,17 @@ window.completeOrder = function(idx) {
       // Also update history
       saveHistoryToGitHubWrap(historyRecord);
 
-      toast('✅ 订单 #' + completed.id + ' 已完成');
       return ordersData;
+    }, function(success) {
+      if (success) {
+        toast('✅ 订单 #' + orderId + ' 已完成');
+        renderOrders();
+      }
     });
   } else {
     var ordersLocal = getOrdersLocal();
+    var idx = ordersLocal.findIndex(function(o) { return o.id === orderId; });
+    if (idx === -1) { toast('❌ 订单不存在'); return; }
     var completed = ordersLocal.splice(idx, 1)[0];
     saveOrdersLocal(ordersLocal);
     ordersCache = ordersLocal;

@@ -214,16 +214,35 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 
 <div class="toast" id="toast"></div>
 
-<!-- gh_config.js 包含 GitHub Token，通过 API 单独部署，不入 git -->
-<script src="gh_config.js"></script>
 <script>
 (function(){
 'use strict';
 
 // ==================== GITHUB BACKEND CONFIG ====================
-// Token 从 gh_config.js 加载（不入 git 仓库，避免推保护拦截）
-var GH_CONFIG = window.GH_CONFIG || {
-  token: 'YOUR_GITHUB_TOKEN',
+// 🔑 访问方式：https://syhhff.github.io/haochu/#token=你的Token
+// Token 仅存浏览器 localStorage，不在任何代码文件里
+var GH_TOKEN_KEY = 'hqtx_gh_token';
+
+function loadToken() {
+  // 1. 从 URL hash 中读取（首次访问或分享链接）
+  var hash = location.hash;
+  if (hash) {
+    var m = hash.match(/token=([^&]+)/);
+    if (m && m[1]) {
+      var token = m[1];
+      try { localStorage.setItem(GH_TOKEN_KEY, token); } catch(e) {}
+      // 清除 URL 中的 token
+      history.replaceState(null, '', location.pathname + location.search);
+      return token;
+    }
+  }
+  // 2. 从 localStorage 读取
+  try { return localStorage.getItem(GH_TOKEN_KEY); } catch(e) { return null; }
+}
+
+var savedToken = loadToken();
+var GH_CONFIG = {
+  token: savedToken || 'YOUR_GITHUB_TOKEN',
   owner: 'syhhff',
   repo: 'haochu',
   branch: 'master'
@@ -237,6 +256,7 @@ try {
     console.log('🐙 GitHub 后端已就绪 — 多人实时同步');
   } else {
     console.warn('⚠️ GitHub Token 未配置，使用本机模式');
+    console.info('💡 在 URL 后加 #token=你的Token 即可启用多人同步');
   }
 } catch(e) {
   console.warn('⚠️ 初始化失败:', e.message);

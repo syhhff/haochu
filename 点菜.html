@@ -119,7 +119,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 
 <div class="header">
   <h1>🏮 豪情天下</h1>
-  <div class="subtitle">美味共享 · 欢聚一堂</div>
+  <div class="subtitle" id="syncStatus">美味共享 · 欢聚一堂</div>
+  <div id="tokenSetup" style="display:none;margin-top:8px;">
+    <input type="password" id="tokenInput" placeholder="粘贴 GitHub Token..." style="width:100%;max-width:280px;padding:8px 12px;border:none;border-radius:8px;font-size:13px;text-align:center;outline:none;">
+    <div style="margin-top:6px;">
+      <button onclick="saveTokenInline()" style="background:#2a7a4a;color:#fff;border:none;border-radius:6px;padding:6px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ 启用多人同步</button>
+      <button onclick="hideTokenSetup()" style="background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer;margin-left:6px;">取消</button>
+    </div>
+  </div>
 </div>
 
 <div class="tabs">
@@ -219,21 +226,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 'use strict';
 
 // ==================== GITHUB BACKEND CONFIG ====================
-// 🔑 访问方式：https://syhhff.github.io/haochu/#token=你的Token
-// Token 仅存浏览器 localStorage，不在任何代码文件里
+// Token 存浏览器 localStorage，不在任何代码文件里（避免 GitHub 推保护拦截）
+// 未配置时会自动在页面顶部显示输入框，粘贴即可
 var GH_TOKEN_KEY = 'hqtx_gh_token';
 
 function loadToken() {
-  // 1. 从 URL hash 中读取（首次访问或分享链接）
+  // 1. 从 URL hash 中读取（首次分享链接）
   var hash = location.hash;
   if (hash) {
     var m = hash.match(/token=([^&]+)/);
     if (m && m[1]) {
-      var token = m[1];
-      try { localStorage.setItem(GH_TOKEN_KEY, token); } catch(e) {}
-      // 清除 URL 中的 token
+      try { localStorage.setItem(GH_TOKEN_KEY, m[1]); } catch(e) {}
       history.replaceState(null, '', location.pathname + location.search);
-      return token;
+      return m[1];
     }
   }
   // 2. 从 localStorage 读取
@@ -250,13 +255,61 @@ var GH_CONFIG = {
 
 var ghReady = false;
 
+function $$(id) { return document.getElementById(id); }
+
+function updateSyncUI() {
+  if (ghReady) {
+    $$('syncStatus').innerHTML = '🐙 多人实时同步已启用';
+    $$('syncStatus').style.cursor = 'pointer';
+    $$('syncStatus').title = '点击更换 Token';
+    $$('tokenSetup').style.display = 'none';
+  } else {
+    $$('syncStatus').innerHTML = '美味共享 · 欢聚一堂 <span style="font-size:11px;opacity:0.7;">🔑 点击配置多人同步</span>';
+    $$('syncStatus').style.cursor = 'pointer';
+    $$('syncStatus').title = '点击配置 GitHub Token 启用多人同步';
+  }
+}
+
+// Click subtitle to toggle token setup
+$$('syncStatus').addEventListener('click', function() {
+  if (!$$('tokenSetup').style.display || $$('tokenSetup').style.display === 'none') {
+    $$('tokenSetup').style.display = 'block';
+    $$('tokenInput').value = '';
+    $$('tokenInput').focus();
+  } else {
+    hideTokenSetup();
+  }
+});
+
+window.hideTokenSetup = function() {
+  $$('tokenSetup').style.display = 'none';
+};
+
+window.saveTokenInline = function() {
+  var tok = $$('tokenInput').value.trim();
+  if (!tok) { toast('请粘贴 GitHub Token'); return; }
+  if (tok.indexOf('github_pat_') !== 0 && tok.indexOf('ghp_') !== 0) {
+    toast('⚠️ Token 格式不对，应以 github_pat_ 或 ghp_ 开头');
+    return;
+  }
+  try { localStorage.setItem(GH_TOKEN_KEY, tok); } catch(e) {}
+  GH_CONFIG.token = tok;
+  ghReady = true;
+  hideTokenSetup();
+  updateSyncUI();
+  startPolling();
+  fetchOrders(function() {
+    renderOrders();
+    toast('✅ 多人同步已启用！');
+  });
+};
+
 try {
   if (GH_CONFIG.token && GH_CONFIG.token !== 'YOUR_GITHUB_TOKEN') {
     ghReady = true;
     console.log('🐙 GitHub 后端已就绪 — 多人实时同步');
   } else {
-    console.warn('⚠️ GitHub Token 未配置，使用本机模式');
-    console.info('💡 在 URL 后加 #token=你的Token 即可启用多人同步');
+    console.warn('⚠️ GitHub Token 未配置 — 点击页面顶部标题区域即可配置');
   }
 } catch(e) {
   console.warn('⚠️ 初始化失败:', e.message);
@@ -1000,6 +1053,7 @@ function init() {
   renderCatTabs();
   renderDishes();
   updateCartUI();
+  updateSyncUI();
 
   if (ghReady) {
     startPolling();

@@ -282,13 +282,21 @@ var currentTab = 'menu';
 var pollTimer = null;
 var lastOrdersETag = '';
 var lastHistoryETag = '';
+var ordersWroteAt = 0;   // timestamp of last successful write — guards against stale CDN reads
+var ordersWriteHash = ''; // fingerprint of last written data
 
 function getOrders() {
   if (ghReady) return ordersCache;
   return getOrdersLocal();
 }
 
-// Read orders from GitHub raw
+// Fast hash for cache freshness check
+function hashData(d) {
+  try { return JSON.stringify(d).length + ':' + (JSON.stringify(d).substr(0, 20)); }
+  catch(e) { return ''; }
+}
+
+// Read orders from GitHub raw — with CDN-staleness guard
 function fetchOrders(callback) {
   if (!ghReady) { if (callback) callback(); return; }
   var url = 'https://raw.githubusercontent.com/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/' + GH_CONFIG.branch + '/orders_data.json';
@@ -297,12 +305,27 @@ function fetchOrders(callback) {
 
   fetch(url, { headers: headers, cache: 'no-store' })
     .then(function(res) {
-      if (res.status === 304) { if (callback) callback(); return; } // not modified
+      if (res.status === 304) { if (callback) callback(); return; }
       lastOrdersETag = res.headers.get('ETag') || '';
       return res.json();
     })
     .then(function(data) {
       if (!data) return;
+      // Guard: don't overwrite with stale CDN data if we just wrote
+      var now = Date.now();
+      if (ordersWroteAt > 0 && (now - ordersWroteAt) < 8000) {
+        var cdHash = hashData(data);
+        if (cdHash !== ordersWriteHash) {
+          console.log('⏳ CDN 尚未同步，保留本地缓存');
+          // Still render if on orders tab, but don't replace cache
+          if (currentTab === 'orders') renderOrders();
+          if (callback) callback();
+          return;
+        }
+        // CDN caught up — clear the guard
+        ordersWroteAt = 0;
+        ordersWriteHash = '';
+      }
       ordersCache = data;
       if (currentTab === 'orders') renderOrders();
       if (callback) callback();
@@ -336,7 +359,21 @@ function fetchHistory() {
     });
 }
 
-// Get SHA of a file (needed for writes)
+// UTF-8 safe base64 decode for GitHub API content
+function b64Decode(b64) {
+  try {
+    return decodeURIComponent(escape(atob(b64)));
+  } catch(e) {
+    return atob(b64); // fallback for pure ASCII
+  }
+}
+
+// UTF-8 safe base64 encode
+function b64Encode(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// Get SHA + content of a file from GitHub API
 function getShaAndContent(filename) {
   var url = 'https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/' + filename + '?ref=' + GH_CONFIG.branch;
   return fetch(url, {
@@ -345,72 +382,36 @@ function getShaAndContent(filename) {
       'Accept': 'application/vnd.github+json'
     }
   }).then(function(res) {
-    if (!res.ok) throw new Error('获取文件信息失败: ' + res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }).then(function(data) {
-    var content = JSON.parse(atob(data.content));
+    var content = JSON.parse(b64Decode(data.content));
     return { sha: data.sha, content: content };
   });
 }
 
-// Write orders to GitHub
-function saveOrdersToGitHub(orders) {
-  updateFile('orders_data.json', orders, '📝 更新订单');
-}
-
-// Write history to GitHub
-function saveHistoryToGitHub(history) {
-  updateFile('history_data.json', history, '📜 更新历史');
-}
-
-function updateFile(filename, data, msg) {
-  // First get the current SHA
-  var url = 'https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/' + filename + '?ref=' + GH_CONFIG.branch;
-  return fetch(url, {
-    headers: {
-      'Authorization': 'Bearer ' + GH_CONFIG.token,
-      'Accept': 'application/vnd.github+json'
-    }
-  }).then(function(res) {
-    if (!res.ok) throw new Error('获取文件信息失败: ' + res.status);
-    return res.json();
-  }).then(function(fileInfo) {
-    var content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
-    return fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + GH_CONFIG.token,
-        'Accept': 'application/vnd.github+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: msg,
-        content: content,
-        sha: fileInfo.sha,
-        branch: GH_CONFIG.branch
-      })
-    });
-  }).then(function(res) {
-    if (!res.ok) throw new Error('写入失败: ' + res.status);
-    return res.json();
-  });
-}
-
+// Atomic update with retry — READ-MODIFY-WRITE with conflict resolution
 function atomicallyUpdateOrders(modifyFn, callback) {
   if (!ghReady) { if (callback) callback(true); return; }
 
   var maxRetries = 3;
+  var done = false; // prevent double callback
+
+  function safeCallback(success) {
+    if (!done) { done = true; if (callback) callback(success); }
+  }
 
   function attempt(retryCount) {
-    getShaAndContent('orders_data.json').then(function(result) {
+    return getShaAndContent('orders_data.json').then(function(result) {
       var newData = modifyFn(result.content);
       if (newData === null) {
-        // modifyFn signals "no write needed" (e.g. order not found)
-        if (callback) callback(false);
-        return;
+        safeCallback(false);
+        return null; // signal: no write
       }
-      var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(newData, null, 2))));
-      return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/orders_data.json', {
+      var jsonStr = JSON.stringify(newData, null, 2);
+      var contentB64 = b64Encode(jsonStr);
+      var apiUrl = 'https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/orders_data.json';
+      return fetch(apiUrl, {
         method: 'PUT',
         headers: {
           'Authorization': 'Bearer ' + GH_CONFIG.token,
@@ -425,27 +426,30 @@ function atomicallyUpdateOrders(modifyFn, callback) {
         })
       }).then(function(res) {
         if (res.status === 409 && retryCount < maxRetries) {
-          // Conflict — another device wrote first. Retry with fresh SHA
           console.warn('⚠️ 写入冲突，自动重试 (' + (retryCount + 1) + '/' + maxRetries + ')');
-          return new Promise(function(resolve) { setTimeout(resolve, 200 + Math.random() * 300); })
+          return new Promise(function(resolve) { setTimeout(resolve, 300 + Math.random() * 500); })
             .then(function() { return attempt(retryCount + 1); });
         }
-        if (!res.ok) throw new Error('写入失败 HTTP ' + res.status);
-        // ✅ Success — update local cache directly (avoids CDN cache delay)
+        if (!res.ok) {
+          return res.json().then(function(errBody) {
+            throw new Error(errBody.message || ('HTTP ' + res.status));
+          }).catch(function() { throw new Error('HTTP ' + res.status); });
+        }
+        // ✅ Success
         ordersCache = newData;
-        lastOrdersETag = '';
-        // Polling will re-fetch in background; no need to fetch now
-        if (callback) callback(true);
+        ordersWroteAt = Date.now();
+        ordersWriteHash = hashData(newData);
+        safeCallback(true);
       });
     }).catch(function(err) {
-      console.error('操作失败:', err);
+      console.error('同步错误:', err.message);
       if (retryCount < maxRetries) {
-        console.warn('⚠️ 网络错误，自动重试 (' + (retryCount + 1) + '/' + maxRetries + ')');
+        console.warn('⚠️ 自动重试 (' + (retryCount + 1) + '/' + maxRetries + ')');
         return new Promise(function(resolve) { setTimeout(resolve, 500 + Math.random() * 500); })
           .then(function() { return attempt(retryCount + 1); });
       }
-      toast('❌ 同步失败，请稍后重试');
-      if (callback) callback(false);
+      toast('❌ 同步失败: ' + err.message);
+      safeCallback(false);
     });
   }
 
@@ -461,7 +465,7 @@ function startPolling() {
   pollTimer = setInterval(function() {
     fetchOrders();
     fetchHistory();
-  }, 2000);
+  }, 3000); // increased from 2s to 3s to reduce rate pressure
 }
 
 function stopPolling() {
@@ -719,7 +723,7 @@ window.submitOrder = function() {
     }
     saveOrdersLocal(orders);
     ordersCache = orders;
-    onSyncDone();
+    onSyncDone(true);
   }
 };
 
@@ -830,7 +834,7 @@ function saveHistoryToGitHubWrap(record) {
   getShaAndContent('history_data.json').then(function(result) {
     var history = result.content || [];
     history.unshift(record);
-    var contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(history, null, 2))));
+    var contentB64 = b64Encode(JSON.stringify(history, null, 2));
     return fetch('https://api.github.com/repos/' + GH_CONFIG.owner + '/' + GH_CONFIG.repo + '/contents/history_data.json', {
       method: 'PUT',
       headers: {

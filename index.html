@@ -214,15 +214,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 
 <div class="toast" id="toast"></div>
 
+<!-- gh_config.js 包含 GitHub Token，通过 API 单独部署，不入 git -->
+<script src="gh_config.js"></script>
 <script>
 (function(){
 'use strict';
 
 // ==================== GITHUB BACKEND CONFIG ====================
-// 只需要一个 GitHub Token！在 https://github.com/settings/tokens 创建
-// 选 "Fine-grained token" → 仅给 haochu 仓库 → Contents: Read and Write
-var GH_CONFIG = {
-  token: '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',
+// Token 从 gh_config.js 加载（不入 git 仓库，避免推保护拦截）
+var GH_CONFIG = window.GH_CONFIG || {
+  token: 'YOUR_GITHUB_TOKEN',
   owner: 'syhhff',
   repo: 'haochu',
   branch: 'master'
@@ -231,7 +232,7 @@ var GH_CONFIG = {
 var ghReady = false;
 
 try {
-  if (GH_CONFIG.token !== 'YOUR_GITHUB_TOKEN') {
+  if (GH_CONFIG.token && GH_CONFIG.token !== 'YOUR_GITHUB_TOKEN') {
     ghReady = true;
     console.log('🐙 GitHub 后端已就绪 — 多人实时同步');
   } else {

@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "id": "MR0N23UVTGKO",
+    "date": "2026-06-30",
+    "createdAt": "2026-06-30T12:44:22.663Z",
+    "items": [
+      {
+        "name": "炒土豆丝",
+        "category": "炒菜",
+        "qty": 1
+      },
+      {
+        "name": "干锅虾",
+        "category": "炒菜",
+        "qty": 1
+      },
+      {
+        "name": "可乐鸡翅",
+        "category": "炒菜",
+        "qty": 1
+      },
+      {
+        "name": "鸡汤",
+        "category": "汤类",
+        "qty": 1
+      }
+    ]
+  }
+]
